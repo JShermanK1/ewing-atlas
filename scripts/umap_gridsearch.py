@@ -221,7 +221,6 @@ fig.savefig("figures/params.pdf")
 # %%
 sc.pp.pca(
     merged_data,
-    layer= "norm_scaled_genes",
     mask_var= "highly_variable",
     n_comps= grids.best_params_["scpca__n_comps"]
 )
