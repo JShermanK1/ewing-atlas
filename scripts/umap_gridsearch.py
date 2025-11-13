@@ -12,6 +12,7 @@ import sklearn.pipeline as pipe
 import sklearn.neighbors as nbr
 import sklearn.base as skbase
 import sklearn.model_selection as skms
+from sklearn.experimental import enable_halving_search_cv
 import pickle
 import os
 import joblib
@@ -75,6 +76,19 @@ sc.pl.highest_expr_genes(
 )
 
 # %%
+
+sc.pp.highly_variable_genes(
+    merged_data,
+    n_top_genes= 2000,
+    flavor= "seurat_v3",
+    layer= "spliced",
+)
+
+sc.pl.highly_variable_genes(
+    merged_data,
+    save= "_merged.png",
+)
+
 sc.pp.normalize_total(
     merged_data,
     exclude_highly_expressed= True,
@@ -84,21 +98,12 @@ sc.pp.normalize_total(
 
 sc.pp.log1p(
     merged_data,
-)
-
-sc.pp.highly_variable_genes(
-    merged_data,
-    n_top_genes= 2000,
-    flavor= "seurat_v3"
-)
-
-sc.pl.highly_variable_genes(
-    merged_data,
-    save= "_merged.png"
+    layer= "spliced",
 )
 
 sc.pp.scale(
     merged_data,
+    layer= "spliced",
 )
 
 # %%
@@ -158,29 +163,27 @@ class ScScore(skbase.TransformerMixin, skbase.BaseEstimator):
 
     def score(estimator, X, y= None, sample_weight= None):
         return skm.silhouette_score(
-            X.obsp["distances"],
-            metric= "precomputed",
+            X.obsm["X_pca"],
             labels= X.obs["leiden"]
         )
 
 # %%
-pca = ScPCA(mask= "highly_variable")
+pca = ScPCA(
+    mask= "highly_variable",
+    layer= "spliced",
+)
 neighbors = ScNeighbors()
 scleid = ScLeiden()
 scscorer = ScScore()
 workflow = pipe.make_pipeline(pca, neighbors, scleid, scscorer)
 param_grid = {
-    "scpca__n_comps": range(20, 40),
-    "scneighbors__n_neighbors": range(40, 60),
+    "scpca__n_comps": range(10, 30),
+    "scneighbors__n_neighbors": range(20, 50),
     "scleiden__resolution": np.linspace(0.1, 2, 10) 
 }
 X_train, X_test = skms.train_test_split(
     merged_data,
     test_size= 0.2,
-    random_state= 0,
-)
-kfold = skms.KFold(
-    shuffle= True,
     random_state= 0,
 )
 
@@ -191,12 +194,11 @@ workflow.score(merged_data)
 
 # %%
 
-grids = skms.GridSearchCV(
+grids = skms.HalvingGridSearchCV(
     workflow,
     param_grid= param_grid,
-    cv= kfold,
-    return_train_score= True,
-    pre_dispatch= 48
+    min_resources= 1000,
+    n_jobs= -1,
 ) 
 
 with joblib.parallel_backend("loky"):
@@ -207,7 +209,7 @@ with joblib.parallel_backend("loky"):
 grids.best_params_
 
 # %%
-with open("pickles/gridsearch", "wb") as f:
+with open("pickles/gridsearch_1000", "wb") as f:
     pickle.dump(grids, f)
 
 # %%
@@ -216,13 +218,14 @@ for ax, param in zip(axs, param_grid.keys()):
     sns.lineplot(x= grids.cv_results_["param_" + param], y= grids.cv_results_["mean_test_score"], ax= ax)
     ax.set_title(param)
 fig.tight_layout()
-fig.savefig("figures/params.pdf")
+fig.savefig("figures/params_1000.pdf")
 
 # %%
 sc.pp.pca(
     merged_data,
     mask_var= "highly_variable",
-    n_comps= grids.best_params_["scpca__n_comps"]
+    n_comps= grids.best_params_["scpca__n_comps"],
+    layer= "spliced",
 )
 
 sc.pl.pca_variance_ratio(
@@ -245,11 +248,10 @@ sc.tl.leiden(
     merged_data,
     resolution= grids.best_params_["scleiden__resolution"]
 )
-skm.silhouette_score(
-    merged_data.obsp["distances"],
-    metric= "precomputed",
+print(skm.silhouette_score(
+    merged_data.obsm["X_pca"],
     labels= merged_data.obs["leiden"]
-)
+))
 
 # %%
 sc.pl.umap(
@@ -259,6 +261,7 @@ sc.pl.umap(
         "leiden", 
     ],
     gene_symbols= "gene_symbol",
+    layer= "spliced",
     cmap= "viridis",
     palette= cc.glasbey_category10,
     save= "_merged.png",
