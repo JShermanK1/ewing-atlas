@@ -1,24 +1,27 @@
 # %%
-import scanpy as sc
-import pandas as pd
-import numpy as np
-from matplotlib import pyplot as plt
-import seaborn as sns
-import sklearn.metrics as skm
-import colorcet as cc
-import sklearn as sk
-import sklearn.decomposition as decomp
-import sklearn.pipeline as pipe
-import sklearn.neighbors as nbr
-import sklearn.base as skbase
-import sklearn.model_selection as skms
-from sklearn.experimental import enable_halving_search_cv
-import pickle
-import os
-import joblib
 import glob
-import anndata as ann
+import os
+import pickle
 
+import anndata as ann
+import colorcet as cc
+import joblib
+import numpy as np
+import pandas as pd
+import scanpy as sc
+import seaborn as sns
+import sklearn as sk
+import sklearn.base as skbase
+import sklearn.decomposition as decomp
+import sklearn.metrics as skm
+import sklearn.model_selection as skms
+import sklearn.neighbors as nbr
+import sklearn.pipeline as pipe
+from matplotlib import pyplot as plt
+from sklearn.experimental import enable_halving_search_cv
+
+sns.set_style("whitegrid")
+analysis_layer = None #None == "X"
 # %%
 os.makedirs(
     "figures",
@@ -54,7 +57,6 @@ sc.pl.violin(
 )
 
 # %%
-sns.set_style("whitegrid")
 sc.pl.scatter(
     merged_data,
     "sum",
@@ -81,7 +83,7 @@ sc.pp.highly_variable_genes(
     merged_data,
     n_top_genes= 2000,
     flavor= "seurat_v3",
-    layer= "spliced",
+    layer= analysis_layer,
 )
 
 sc.pl.highly_variable_genes(
@@ -93,17 +95,17 @@ sc.pp.normalize_total(
     merged_data,
     exclude_highly_expressed= True,
     key_added= "norm_factor",
-    layer= "spliced",
+    layer= analysis_layer,
 )
 
 sc.pp.log1p(
     merged_data,
-    layer= "spliced",
+    layer= analysis_layer,
 )
 
 sc.pp.scale(
     merged_data,
-    layer= "spliced",
+    layer= analysis_layer,
 )
 
 # %%
@@ -161,7 +163,7 @@ class ScScore(skbase.TransformerMixin, skbase.BaseEstimator):
     def fit(self, X, y= None):
         return self
 
-    def score(estimator, X, y= None, sample_weight= None):
+    def score(self, X, y= None, sample_weight= None):
         return skm.silhouette_score(
             X.obsm["X_pca"],
             labels= X.obs["leiden"]
@@ -170,7 +172,7 @@ class ScScore(skbase.TransformerMixin, skbase.BaseEstimator):
 # %%
 pca = ScPCA(
     mask= "highly_variable",
-    layer= "spliced",
+    layer= analysis_layer,
 )
 neighbors = ScNeighbors()
 scleid = ScLeiden()
@@ -197,7 +199,7 @@ workflow.score(merged_data)
 grids = skms.HalvingGridSearchCV(
     workflow,
     param_grid= param_grid,
-    min_resources= 1000,
+    min_resources= X_train.n_obs // 3 ** 4 ,
     n_jobs= -1,
 ) 
 
@@ -225,7 +227,7 @@ sc.pp.pca(
     merged_data,
     mask_var= "highly_variable",
     n_comps= grids.best_params_["scpca__n_comps"],
-    layer= "spliced",
+    layer= analysis_layer,
 )
 
 sc.pl.pca_variance_ratio(
@@ -259,12 +261,16 @@ sc.pl.umap(
     color= [
         "CDH1",
         "leiden", 
+        "tissue_location",
+        "disease_timing",
     ],
     gene_symbols= "gene_symbol",
-    layer= "spliced",
-    cmap= "viridis",
+    layer= analysis_layer,
+    cmap= "inferno",
     palette= cc.glasbey_category10,
     save= "_merged.png",
+    vmax= 4,
+    ncols= 1,
 )
 
 # %%
