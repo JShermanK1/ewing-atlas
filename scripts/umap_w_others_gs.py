@@ -7,15 +7,11 @@ import anndata as ann
 import colorcet as cc
 import joblib
 import numpy as np
-import pandas as pd
 import scanpy as sc
 import seaborn as sns
-import sklearn as sk
 import sklearn.base as skbase
-import sklearn.decomposition as decomp
 import sklearn.metrics as skm
 import sklearn.model_selection as skms
-import sklearn.neighbors as nbr
 import sklearn.pipeline as pipe
 from matplotlib import pyplot as plt
 from sklearn.experimental import enable_halving_search_cv
@@ -37,7 +33,7 @@ os.makedirs(
 )
 
 # %%
-files = glob.glob("Alex_Lemonade_portal/**/*_filtered*.h5ad")
+files = glob.glob("Alex_Lemonade_portal/**/*_filtered*.h5ad", recursive= True)
 datasets = [sc.read_h5ad(f) for f in files]
 ids = ["sample" + f.split("/")[-1].split("_")[0][-3:] for f in files]
 merged_data = ann.concat(
@@ -47,13 +43,16 @@ merged_data = ann.concat(
     label= "sample", 
     index_unique= "-"
 )
+merged_data.obs["age"] = merged_data.obs["age"].astype(float)
+merged_data.obs = merged_data.obs.drop(columns= "subdiagnosis")
+merged_data.write_h5ad("data/merged_w_others.h5ad")
 
 # %%
 sc.pl.violin(
     merged_data,
     ["sum", "detected", "subsets_mito_percent"],
     multi_panel= True,
-    save= "_preproc.png"
+    save= "others_preproc.png"
 )
 
 # %%
@@ -63,7 +62,7 @@ sc.pl.scatter(
     "detected",
     color= "subsets_mito_percent",
     color_map= "viridis",
-    save= "_sum_vs_detected.png"
+    save= "others_sum_vs_detected.png"
 )
 
 # %%
@@ -74,7 +73,7 @@ merged_data.var.loc[merged_data.var["gene_symbol"] == "nan", "gene_symbol"] = me
 sc.pl.highest_expr_genes(
     merged_data,
     gene_symbols= "gene_symbol",
-    save= "_merged.png"
+    save= "others_merged.png"
 )
 
 # %%
@@ -88,7 +87,7 @@ sc.pp.highly_variable_genes(
 
 sc.pl.highly_variable_genes(
     merged_data,
-    save= "_merged.png",
+    save= "others_merged.png",
 )
 
 sc.pp.normalize_total(
@@ -213,7 +212,7 @@ with joblib.parallel_backend("loky"):
 grids.best_params_
 
 # %%
-with open("pickles/gridsearch_1000", "wb") as f:
+with open("pickles/gridsearch_others_1000", "wb") as f:
     pickle.dump(grids, f)
 
 # %%
@@ -222,7 +221,7 @@ for ax, param in zip(axs, param_grid.keys()):
     sns.lineplot(x= grids.cv_results_["param_" + param], y= grids.cv_results_["mean_test_score"], ax= ax)
     ax.set_title(param)
 fig.tight_layout()
-fig.savefig("figures/params_1000.pdf")
+fig.savefig("figures/others_params_1000.pdf")
 
 # %%
 sc.pp.pca(
@@ -235,7 +234,7 @@ sc.pp.pca(
 sc.pl.pca_variance_ratio(
     merged_data,
     log= True,
-    save= "_merged.png"
+    save= "others_merged.png"
 )
 
 # %%
@@ -270,7 +269,7 @@ sc.pl.umap(
     layer= analysis_layer,
     cmap= "inferno",
     palette= cc.glasbey_category10,
-    save= "_merged.png",
+    save= "others_merged.png",
     vmax= 4,
     ncols= 1,
 )
