@@ -2,11 +2,17 @@
 import glob
 import os
 import pickle
+import time
 
 import anndata as ann
 import colorcet as cc
+import cupy as cp
+import cupyx as cpx
+from cupyx.scipy.spatial.distance import pdist
 import joblib
 import numpy as np
+import rapids_singlecell as rsc
+import rmm
 import scanpy as sc
 import seaborn as sns
 import sklearn.base as skbase
@@ -14,36 +20,20 @@ import sklearn.metrics as skm
 import sklearn.model_selection as skms
 import sklearn.pipeline as pipe
 from matplotlib import pyplot as plt
+from rmm.allocators.cupy import rmm_cupy_allocator
 from sklearn.experimental import enable_halving_search_cv
-import argparse
-import pathlib
+import scipy.spatial as sps
+from cuml.metrics.cluster import silhouette_score
 
+rmm.reinitialize(
+    pool_allocator= True,
+)
+cp.cuda.set_allocator(
+    rmm_cupy_allocator
+)
+rng = np.random.default_rng(0)
+    
 sns.set_style("whitegrid")
-
-apr = argparse.ArgumentParser(
-    description= "Gridsearch for clustering arugments that optimize silhouette score",
-)
-apr.add_argument(
-    "--anndata", "-a",
-    type= pathlib.Path,
-    required= True,
-    help= "input annotated dataframe"
-)
-apr.add_argument(
-    "--prefix", "-p",
-    type= str,
-    help= "prefix for outputs",
-)
-apr.add_argument(
-    "--iterations", "-i",
-    type= int,
-    default= 3,
-)
-
-args = apr.parse_args()
-if args.prefix:
-    args.prefix += "-"
-
 analysis_layer = None #None == "X"
 # %%
 os.makedirs(
@@ -60,7 +50,7 @@ os.makedirs(
 )
 
 # %%
-merged_data = sc.read_h5ad(args.anndata)
+merged_data = sc.read_h5ad("data/merged_w_others_preproc.h5ad")
 # %%
 
 sc.pp.normalize_total(
@@ -80,7 +70,12 @@ sc.pp.scale(
     layer= analysis_layer,
 )
 
-merged_data = merged_data[:, merged_data.var["highly_variable"]]
+# %%
+merged_data = merged_data[:, merged_data.var["highly_variable"]].copy()
+# %%
+rsc.get.anndata_to_GPU(merged_data, convert_all= True)
+#sample_size = merged_data.n_obs
+#distA = cp.ndarray(sample_size * (sample_size - 1) // 2, dtype= np.float32)
 
 # %%
 class ScPCA(skbase.TransformerMixin, skbase.BaseEstimator):
@@ -90,14 +85,14 @@ class ScPCA(skbase.TransformerMixin, skbase.BaseEstimator):
         self.mask = mask
 
     def fit(self, X, y= None):
+        self._is_fitted = True
         return self
 
     def transform(self, X):
-        sc.pp.pca(
+        rsc.pp.pca(
             X,
             n_comps= self.n_comps,
             mask_var= self.mask,
-            layer= self.layer,
         )
         return X
 
@@ -107,10 +102,11 @@ class ScNeighbors(skbase.TransformerMixin, skbase.BaseEstimator):
         self.n_pcs = n_pcs
 
     def fit(self, X, y= None):
+        self._is_fitted = True
         return self
         
     def transform(self, X):
-        sc.pp.neighbors(
+        rsc.pp.neighbors(
             X,
             n_neighbors= self.n_neighbors,
             n_pcs= self.n_pcs,
@@ -122,26 +118,31 @@ class ScLeiden(skbase.TransformerMixin, skbase.BaseEstimator):
         self.resolution = resolution
 
     def fit(self, X, y= None):
+        self._is_fitted = True
         return self
 
     def transform(self, X):
-        sc.tl.leiden(
+        rsc.tl.leiden(
             X,
             resolution= self.resolution,
-            flavor= "igraph",
         )
         return X
 
-class ScScore(skbase.TransformerMixin, skbase.BaseEstimator):
+class ScScore(skbase.BaseEstimator):
 
     def fit(self, X, y= None):
+        self._is_fitted = True
         return self
 
+
     def score(self, X, y= None, sample_weight= None):
-        return skm.silhouette_score(
+        return silhouette_score(
             X.obsm["X_pca"],
-            labels= X.obs["leiden"]
+            labels= X.obs["leiden"].cat.codes,
         )
+    
+    def __sklearn_is_fitted__(self):
+        return hasattr(self, "_is_fitted") and self._is_fitted
 
 # %%
 pca = ScPCA(
@@ -166,6 +167,7 @@ X_train, X_test = skms.train_test_split(
 
 # %%
 workflow.fit(merged_data)
+# %%
 workflow.score(merged_data)
 
 # %%
@@ -173,19 +175,16 @@ workflow.score(merged_data)
 grids = skms.HalvingGridSearchCV(
     workflow,
     param_grid= param_grid,
-    min_resources= X_train.n_obs // 3 ** (args.iterations - 1),
-    n_jobs= -1,
+    min_resources= X_train.n_obs // 3 ** 2,
 ) 
 
-with joblib.parallel_backend("loky"):
-    grids.fit(X_train)
-
+grids.fit(merged_data)
 
 # %%
 grids.best_params_
 
 # %%
-with open(f"pickles/{args.prefix}gridsearch_1000", "wb") as f:
+with open("pickles/gridsearch_others_gpu_1000", "wb") as f:
     pickle.dump(grids, f)
 
 # %%
@@ -194,7 +193,7 @@ for ax, param in zip(axs, param_grid.keys()):
     sns.lineplot(x= grids.cv_results_["param_" + param], y= grids.cv_results_["mean_test_score"], ax= ax)
     ax.set_title(param)
 fig.tight_layout()
-fig.savefig(f"figures/{args.prefix}params_1000.pdf")
+fig.savefig("figures/others_gpu_params_1000.pdf")
 
 # %%
 sc.pp.pca(
@@ -207,7 +206,7 @@ sc.pp.pca(
 sc.pl.pca_variance_ratio(
     merged_data,
     log= True,
-    save= f"{args.prefix}merged.png"
+    save= "others_gpu_merged.png"
 )
 
 # %%
@@ -230,6 +229,21 @@ print(skm.silhouette_score(
 ))
 
 # %%
-
+sc.pl.umap(
+    merged_data,
+    color= [
+        "CDH1",
+        "leiden", 
+        "tissue_location",
+        "disease_timing",
+    ],
+    gene_symbols= "gene_symbol",
+    layer= analysis_layer,
+    cmap= "inferno",
+    palette= cc.glasbey_category10,
+    save= "others_gpu_merged.png",
+    vmax= 4,
+    ncols= 1,
+)
 
 # %%
