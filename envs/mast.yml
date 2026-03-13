@@ -1,0 +1,14 @@
+name: mast
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - r-base
+  - r-tidyverse
+  - r-essentials
+  - r-irkernel
+  - r-languageserver
+  - bioconductor-mast
+  - bioconductor-anndatar
+  - bioconductor-rhdf5
+  - r-parallelly
