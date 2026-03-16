@@ -24,13 +24,22 @@ from rmm.allocators.cupy import rmm_cupy_allocator
 from sklearn.experimental import enable_halving_search_cv
 import scipy.spatial as sps
 from cuml.metrics.cluster import silhouette_score
+import dask
+from dask_cuda import LocalCUDACluster
+from dask.distributed import Client
 
-rmm.reinitialize(
-    pool_allocator= True,
-)
-cp.cuda.set_allocator(
-    rmm_cupy_allocator
-)
+preprocessing_gpus = [str(i) for i in range(8)].join(",")
+cluster = LocalCUDACluster(
+        CUDA_VISIBLE_DEVICES= preprocessing_gpus,
+        threads_per_worker= 10,
+        protocol= "ucx",
+        rmm_pool_size= "10GB",
+        rmm_maximum_pool_size= "110GB",
+        rmm_allocator_external_lib_list= "cupy",
+    )
+client = Client(cluster)
+
+
 rng = np.random.default_rng(0)
     
 sns.set_style("whitegrid")
@@ -74,6 +83,8 @@ sc.pp.scale(
 merged_data = merged_data[:, merged_data.var["highly_variable"]].copy()
 # %%
 rsc.get.anndata_to_GPU(merged_data, convert_all= True)
+merged_data.X.persist()
+merged_data.X.compute_chunk_sizes()
 #sample_size = merged_data.n_obs
 #distA = cp.ndarray(sample_size * (sample_size - 1) // 2, dtype= np.float32)
 

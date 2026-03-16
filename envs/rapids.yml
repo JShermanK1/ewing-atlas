@@ -8,6 +8,8 @@ dependencies:
   - rapids=26.02
   - python=3.13
   - cuda-version=12.8
+  - dask
+  - dask-cuda
   - cudnn
   - cutensor
   - cusparselt
