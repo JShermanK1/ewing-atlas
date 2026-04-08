@@ -12,3 +12,4 @@ dependencies:
   - bioconductor-anndatar
   - bioconductor-rhdf5
   - r-parallelly
+  - r-lme4
