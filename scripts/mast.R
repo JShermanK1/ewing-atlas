@@ -13,25 +13,25 @@ sce <- read_h5ad(
 cd2 <- colSums(assay(sce, i = 4) > 0)
 colData(sce)$detected <- scale(cd2)
 
-colData(sca)$idents <- as.factor(
+colData(sce)$idents <- as.factor(
     gsub(
         " ",
         "_",
-        as.character(colData(sca)$idents),
+        as.character(colData(sce)$idents)
     )
 )
 
-colData(sca)$disease_timing <- as.factor(
+colData(sce)$disease_timing <- as.factor(
     gsub(
         " ",
         "_",
-        as.character(colData(sca)$disease_timing)
+        as.character(colData(sce)$disease_timing)
     )
 )
 
 sca <- SceToSingleCellAssay(sce)
 zlm_mod <- zlm(
-  ~ idents + (1 | disease_timing / sample_id) + detected,
+  ~ idents + (1 | sample_id) + detected,
   sca,
   exprs_values = "log",
   method = "glmer",
