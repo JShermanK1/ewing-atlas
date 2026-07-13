@@ -39,6 +39,11 @@ apr.add_argument(
     type= int,
     default= 3,
 )
+apr.add_argument(
+    "--transpose", "-t",
+    action= "store_true",
+    help= "transpose anndata before gridsearch",
+)
 
 args = apr.parse_args()
 if args.prefix:
@@ -65,7 +70,7 @@ merged_data = sc.read_h5ad(args.anndata)
 
 sc.pp.normalize_total(
     merged_data,
-    exclude_highly_expressed= True,
+    exclude_highly_expressed= False,
     key_added= "norm_factor",
     layer= analysis_layer,
 )
@@ -80,7 +85,9 @@ sc.pp.scale(
     layer= analysis_layer,
 )
 
-merged_data = merged_data[:, merged_data.var["highly_variable"]]
+merged_data = merged_data[:, merged_data.var["highly_variable"]].copy()
+if args.transpose:
+    merged_data = merged_data.T
 
 # %%
 class ScPCA(skbase.TransformerMixin, skbase.BaseEstimator):
@@ -89,7 +96,13 @@ class ScPCA(skbase.TransformerMixin, skbase.BaseEstimator):
         self.n_comps = n_comps
         self.mask = mask
 
+    def __sklearn_tags__(self):
+        tags = super().__sklearn_tags__()
+        tags.requires_fit = False
+        return tags
+
     def fit(self, X, y= None):
+        self._is_fitted = True
         return self
 
     def transform(self, X):
@@ -106,7 +119,13 @@ class ScNeighbors(skbase.TransformerMixin, skbase.BaseEstimator):
         self.n_neighbors = n_neighbors
         self.n_pcs = n_pcs
 
+    def __sklearn_tags__(self):
+        tags = super().__sklearn_tags__()
+        tags.requires_fit = False
+        return tags
+
     def fit(self, X, y= None):
+        self._is_fitted = True
         return self
         
     def transform(self, X):
@@ -121,7 +140,13 @@ class ScLeiden(skbase.TransformerMixin, skbase.BaseEstimator):
     def __init__(self, resolution= 1):
         self.resolution = resolution
 
+    def __sklearn_tags__(self):
+        tags = super().__sklearn_tags__()
+        tags.requires_fit = False
+        return tags
+
     def fit(self, X, y= None):
+        self._is_fitted = True
         return self
 
     def transform(self, X):
@@ -133,8 +158,13 @@ class ScLeiden(skbase.TransformerMixin, skbase.BaseEstimator):
         return X
 
 class ScScore(skbase.TransformerMixin, skbase.BaseEstimator):
+    def __sklearn_tags__(self):
+        tags = super().__sklearn_tags__()
+        tags.requires_fit = False
+        return tags
 
     def fit(self, X, y= None):
+        self._is_fitted = True
         return self
 
     def score(self, X, y= None, sample_weight= None):
@@ -145,7 +175,6 @@ class ScScore(skbase.TransformerMixin, skbase.BaseEstimator):
 
 # %%
 pca = ScPCA(
-    mask= "highly_variable",
     layer= analysis_layer,
 )
 neighbors = ScNeighbors()
@@ -166,6 +195,7 @@ X_train, X_test = skms.train_test_split(
 
 # %%
 workflow.fit(merged_data)
+workflow.__sklearn_is_fitted__
 workflow.score(merged_data)
 
 # %%
@@ -199,7 +229,6 @@ fig.savefig(f"figures/{args.prefix}params_1000.pdf")
 # %%
 sc.pp.pca(
     merged_data,
-    mask_var= "highly_variable",
     n_comps= grids.best_params_["scpca__n_comps"],
     layer= analysis_layer,
 )
